@@ -1,0 +1,12 @@
+# Static site: no build step, serve the repo root as is.
+# These settings override whatever is set in the Netlify dashboard.
+[build]
+  base = ""
+  publish = "."
+  command = "echo 'No build step: static site'"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
