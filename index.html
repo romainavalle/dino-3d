@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Dino Run 3D</title>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-VTE8JW49LX"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-VTE8JW49LX');
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap">
 <style>
@@ -388,7 +396,13 @@
     msg.hidden = false;
   }
 
+  // Google Analytics events; never let tracking break the game
+  function track(name, params) {
+    try { if (typeof window.gtag === 'function') window.gtag('event', name, params); } catch (e) {}
+  }
+
   function start() {
+    track('game_start', { previous_high_score: hi });
     clearObstacles();
     y = 0; vy = 0; onGround = true;
     speed = BASE_SPEED; distance = 0; score = 0; shownScore = -1;
@@ -406,6 +420,7 @@
     eyeStand.scale.set(1, 1.9, 1.9);
     eyeDuck.scale.set(1, 1.9, 1.9);
     beep(220, 0.12); setTimeout(() => beep(150, 0.22, -60), 110);
+    track('game_over', { score: Math.floor(score), new_high_score: score > hi, night: nightT > 0.5 });
     if (score > hi) {
       hi = Math.floor(score);
       elHi.textContent = 'HI ' + pad5(hi);
