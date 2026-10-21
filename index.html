@@ -37,8 +37,11 @@
   #score.flash #cur { animation: blink .2s steps(1) 4; }
   @keyframes blink { 50% { opacity: 0; } }
 
-  #sound { position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); font: inherit; font-size: 10px; letter-spacing: .08em; color: var(--ink); background: var(--chip); border: 2px solid var(--ink); padding: 7px 9px; cursor: pointer; }
-  #sound:focus-visible, .pad:focus-visible, #retry:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+  #tools { position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); display: flex; gap: 8px; }
+  .chip { font: inherit; font-size: 10px; line-height: 1; letter-spacing: .08em; color: var(--ink); background: var(--chip); border: 2px solid var(--ink); padding: 7px 9px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+  .chip svg { width: 12px; height: 12px; fill: currentColor; }
+  a.chip:hover { background: var(--ink); color: var(--sky); }
+  .chip:focus-visible, .pad:focus-visible, #retry:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 
   #msg { position: fixed; left: 50%; top: 38%; transform: translate(-50%, -50%); text-align: center; display: grid; gap: 18px; justify-items: center; pointer-events: none; width: min(92vw, 560px); }
   #msg h1 { margin: 0; font-size: clamp(18px, 5vw, 34px); font-weight: 400; letter-spacing: .25em; text-wrap: balance; }
@@ -62,7 +65,13 @@
 <canvas id="stage" tabindex="0" aria-label="3D dinosaur runner game. Space or up arrow to jump, down arrow to duck."></canvas>
 
 <div id="score" class="hud" aria-live="off"><span id="hi">HI 00000</span><span id="cur">00000</span></div>
-<button id="sound" type="button" aria-pressed="true">SOUND ON</button>
+<div id="tools">
+  <button id="sound" class="chip" type="button" aria-pressed="true">SOUND ON</button>
+  <a id="github" class="chip" href="https://github.com/romainavalle/dino-3d/" target="_blank" rel="noopener" aria-label="Source code on GitHub (opens in a new tab)">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.06-.49.06-.49.8.06 1.23.83 1.23.83.72 1.22 1.88.87 2.34.66.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.66 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg>
+    GITHUB
+  </a>
+</div>
 
 <div id="msg">
   <h1 id="msgTitle">DINO RUN 3D</h1>
