@@ -43,6 +43,13 @@
   a.chip:hover { background: var(--ink); color: var(--sky); }
   .chip:focus-visible, .pad:focus-visible, #retry:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 
+  #motion { position: fixed; top: calc(46px + env(safe-area-inset-top, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); width: min(180px, 34vw); display: grid; gap: 6px; padding: 6px; background: var(--chip); border: 2px solid var(--ink); }
+  #camView { position: relative; aspect-ratio: 4 / 3; max-width: 100%; background: #000; overflow: hidden; cursor: pointer; transform: scaleX(-1); }
+  #camView video, #camView canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #camStatus { margin: 0; font-size: 10px; letter-spacing: .1em; }
+  .cam-note { margin: 0; font-size: 7px; letter-spacing: .08em; line-height: 1.7; color: var(--ink-soft); }
+  @media (max-width: 640px) { #score { top: calc(48px + env(safe-area-inset-top, 0px)); } }
+
   #msg { position: fixed; left: 50%; top: 38%; transform: translate(-50%, -50%); text-align: center; display: grid; gap: 18px; justify-items: center; pointer-events: none; width: min(92vw, 560px); }
   #msg h1 { margin: 0; font-size: clamp(18px, 5vw, 34px); font-weight: 400; letter-spacing: .25em; text-wrap: balance; }
   #msg p { margin: 0; font-size: clamp(9px, 2.2vw, 12px); letter-spacing: .12em; line-height: 1.9; color: var(--ink-soft); }
@@ -67,10 +74,17 @@
 <div id="score" class="hud" aria-live="off"><span id="hi">HI 00000</span><span id="cur">00000</span></div>
 <div id="tools">
   <button id="sound" class="chip" type="button" aria-pressed="true">SOUND ON</button>
+  <button id="camera" class="chip" type="button" aria-pressed="false" title="Control the dino by jumping and ducking in front of your webcam">CAMERA</button>
   <a id="github" class="chip" href="https://github.com/romainavalle/dino-3d/" target="_blank" rel="noopener" aria-label="Source code on GitHub (opens in a new tab)">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.06-.49.06-.49.8.06 1.23.83 1.23.83.72 1.22 1.88.87 2.34.66.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.66 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg>
     GITHUB
   </a>
+</div>
+
+<div id="motion" hidden>
+  <div id="camView" title="Click to recalibrate"><video id="camVideo" playsinline muted></video><canvas id="camOverlay"></canvas></div>
+  <p id="camStatus" aria-live="polite">LOADING...</p>
+  <p class="cam-note">JUMP TO JUMP &middot; SQUAT TO DUCK<br>CLICK VIDEO TO RECALIBRATE<br>VIDEO STAYS ON YOUR DEVICE</p>
 </div>
 
 <div id="msg">
@@ -435,7 +449,7 @@
       elHi.textContent = 'HI ' + pad5(hi);
       try { localStorage.setItem('dino3d-hi', String(hi)); } catch (e) {}
     }
-    showMsg('G A M E  O V E R', tapWord + ' TO RETRY', 'SCORE ' + pad5(score), true);
+    showMsg('G A M E  O V E R', hintWord() + ' TO RETRY', 'SCORE ' + pad5(score), true);
   }
 
   function pressJump() {
@@ -472,6 +486,173 @@
     padJump.addEventListener(ev, () => padJump.classList.remove('on'));
   }
   addEventListener('blur', duckOff);
+
+  // ---------- body controls (MediaPipe pose, runs locally in the browser) ----------
+  const MP_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+  const POSE_MODEL = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task';
+  // movement thresholds, in shoulder widths from the calibrated standing height
+  const JUMP_UP = 0.22, JUMP_REARM = 0.08, DUCK_DOWN = 0.4, DUCK_RELEASE = 0.22;
+  const CALIB_FRAMES = 20;
+
+  const camBtn = $('camera'), motionEl = $('motion'), camView = $('camView'), camVideo = $('camVideo'), camOverlay = $('camOverlay'), camStatus = $('camStatus');
+  const octx = camOverlay.getContext('2d');
+  let motionOn = false, motionPending = false, motionDuck = false;
+  let landmarker = null, camStream = null, motionRaf = 0;
+  let lastVideoTime = -1, baseY = 0, baseW = 0, calib = [], jumpArmed = true, lostSince = 0;
+
+  function hintWord() { return motionOn ? 'JUMP' : tapWord; }
+  function refreshHint() {
+    if (state === 'ready') msgHint.textContent = hintWord() + ' TO START';
+    else if (state === 'over') msgHint.textContent = hintWord() + ' TO RETRY';
+  }
+  function setStatus(text) { if (camStatus.textContent !== text) camStatus.textContent = text; }
+  function paintCamBtn() {
+    camBtn.textContent = motionOn ? 'CAMERA ON' : 'CAMERA';
+    camBtn.setAttribute('aria-pressed', String(motionOn));
+  }
+
+  async function startMotion() {
+    motionPending = true;
+    motionEl.hidden = false;
+    setStatus('LOADING...');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setStatus('CAMERA NEEDS HTTPS');
+      motionPending = false;
+      return;
+    }
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+    } catch (e) {
+      setStatus(e && e.name === 'NotAllowedError' ? 'CAMERA BLOCKED' : 'NO CAMERA FOUND');
+      motionPending = false;
+      return;
+    }
+    camVideo.srcObject = camStream;
+    try { await camVideo.play(); } catch (e) {}
+    try {
+      if (!landmarker) {
+        const { FilesetResolver, PoseLandmarker } = await import(MP_URL + '/vision_bundle.mjs');
+        const fileset = await FilesetResolver.forVisionTasks(MP_URL + '/wasm');
+        const opts = delegate => ({ baseOptions: { modelAssetPath: POSE_MODEL, delegate }, runningMode: 'VIDEO', numPoses: 1 });
+        try { landmarker = await PoseLandmarker.createFromOptions(fileset, opts('GPU')); }
+        catch (e) { landmarker = await PoseLandmarker.createFromOptions(fileset, opts('CPU')); }
+      }
+    } catch (e) {
+      stopMotion(true);
+      setStatus('TRACKER FAILED TO LOAD');
+      return;
+    }
+    motionPending = false;
+    if (!camStream) return; // switched off while loading
+    motionOn = true;
+    paintCamBtn();
+    refreshHint();
+    recalibrate();
+    track('camera_enabled');
+    motionRaf = requestAnimationFrame(motionLoop);
+  }
+
+  function stopMotion(keepPanel) {
+    cancelAnimationFrame(motionRaf);
+    if (camStream) camStream.getTracks().forEach(t => t.stop());
+    camStream = null;
+    camVideo.srcObject = null;
+    motionOn = motionPending = motionDuck = false;
+    paintCamBtn();
+    refreshHint();
+    if (!keepPanel) motionEl.hidden = true;
+  }
+
+  function recalibrate() {
+    calib = [];
+    jumpArmed = true;
+    motionDuck = false;
+    lostSince = 0;
+    setStatus('STAND STILL');
+  }
+
+  function drawOverlay(lm, w, h) {
+    octx.clearRect(0, 0, w, h);
+    const line = (yn, color) => { octx.strokeStyle = color; octx.beginPath(); octx.moveTo(0, yn * h); octx.lineTo(w, yn * h); octx.stroke(); };
+    octx.lineWidth = 3;
+    if (calib.length >= CALIB_FRAMES) {
+      octx.setLineDash([10, 8]);
+      line(baseY - JUMP_UP * baseW, '#7fd1ff');
+      line(baseY + DUCK_DOWN * baseW, '#ffb347');
+      octx.setLineDash([]);
+      line(baseY, 'rgba(255,255,255,.45)');
+    }
+    if (!lm) return;
+    octx.strokeStyle = '#fff';
+    octx.lineWidth = 4;
+    octx.beginPath();
+    octx.moveTo(lm[11].x * w, lm[11].y * h);
+    octx.lineTo(lm[12].x * w, lm[12].y * h);
+    octx.stroke();
+    octx.fillStyle = '#fff';
+    for (const i of [0, 11, 12]) octx.fillRect(lm[i].x * w - 5, lm[i].y * h - 5, 10, 10);
+  }
+
+  function motionLoop() {
+    motionRaf = requestAnimationFrame(motionLoop);
+    if (!landmarker || camVideo.readyState < 2 || camVideo.currentTime === lastVideoTime) return;
+    lastVideoTime = camVideo.currentTime;
+    const w = camVideo.videoWidth, h = camVideo.videoHeight;
+    if (camOverlay.width !== w || camOverlay.height !== h) { camOverlay.width = w; camOverlay.height = h; }
+
+    let res;
+    try { res = landmarker.detectForVideo(camVideo, performance.now()); } catch (e) { return; }
+    const lm = res.landmarks && res.landmarks[0];
+    const seen = lm && lm[11].visibility > 0.5 && lm[12].visibility > 0.5;
+    if (!seen) {
+      drawOverlay(null, w, h);
+      if (!lostSince) lostSince = performance.now();
+      if (performance.now() - lostSince > 400) { motionDuck = false; setStatus('STEP INTO VIEW'); }
+      return;
+    }
+    lostSince = 0;
+
+    // shoulder height and width, both in normalized image-height units
+    const sy = (lm[11].y + lm[12].y) / 2;
+    const sw = Math.hypot((lm[11].x - lm[12].x) * w / h, lm[11].y - lm[12].y);
+
+    if (calib.length < CALIB_FRAMES) {
+      calib.push([sy, sw]);
+      setStatus('STAND STILL');
+      if (calib.length === CALIB_FRAMES) {
+        const ys = calib.map(c => c[0]);
+        if (Math.max(...ys) - Math.min(...ys) > 0.04) calib = []; // moved too much, start over
+        else {
+          baseY = ys.reduce((a, b) => a + b, 0) / CALIB_FRAMES;
+          baseW = calib.reduce((a, c) => a + c[1], 0) / CALIB_FRAMES;
+          beep(660, 0.08);
+        }
+      }
+      drawOverlay(lm, w, h);
+      return;
+    }
+
+    const d = (baseY - sy) / baseW; // positive = body moved up, negative = moved down
+    if (jumpArmed && d > JUMP_UP) { jumpArmed = false; pressJump(); }
+    else if (!jumpArmed && d < JUMP_REARM) jumpArmed = true;
+    if (!motionDuck && d < -DUCK_DOWN) motionDuck = true;
+    else if (motionDuck && d > -DUCK_RELEASE) motionDuck = false;
+
+    // follow slow drift (stepping closer, camera nudged) while standing normally
+    if (Math.abs(d) < 0.1) { baseY += (sy - baseY) * 0.02; baseW += (sw - baseW) * 0.02; }
+
+    setStatus(motionDuck ? 'DUCK' : !jumpArmed ? 'JUMP!' : 'READY');
+    drawOverlay(lm, w, h);
+  }
+
+  camBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (motionOn || motionPending) stopMotion();
+    else startMotion();
+    camBtn.blur();
+    canvas.focus();
+  });
+  camView.addEventListener('click', () => { if (motionOn) recalibrate(); });
 
   // ---------- resize ----------
   function resize() {
@@ -535,11 +716,11 @@
         beep(520, 0.09, 260);
       }
       if (!onGround) {
-        vy -= G * (duckHeld ? 2.4 : 1) * dt;
+        vy -= G * (duckHeld || motionDuck ? 2.4 : 1) * dt;
         y += vy * dt;
         if (y <= 0) { y = 0; vy = 0; onGround = true; }
       }
-      ducking = duckHeld && onGround;
+      ducking = (duckHeld || motionDuck) && onGround;
 
       // obstacles
       sinceSpawn += speed * dt;
