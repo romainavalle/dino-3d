@@ -412,7 +412,8 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
   let speed = BASE_SPEED, distance = 0, score = 0, shownScore = -1;
   let sinceSpawn = 0, nextGap = 0;
   let runPhase = 0, overAt = 0, shake = 0, blinkT = 2;
-  let nightT = 0;
+  let nightT = 0, runStartedAt = 0;
+  const SCORE_MILESTONE = 500; // analytics event every 500 points
 
   function showMsg(title, hint, sub, withRetry) {
     msgTitle.textContent = title;
@@ -435,6 +436,7 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     sinceSpawn = 0; nextGap = 26;
     eyeStand.scale.set(1, 1, 1); eyeDuck.scale.set(1, 1, 1);
     spawnObstacle(-75);
+    runStartedAt = performance.now();
     state = 'running';
     msg.hidden = true;
   }
@@ -446,7 +448,16 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     eyeStand.scale.set(1, 1.9, 1.9);
     eyeDuck.scale.set(1, 1.9, 1.9);
     beep(220, 0.12); setTimeout(() => beep(150, 0.22, -60), 110);
-    track('game_over', { score: Math.floor(score), new_high_score: score > hi, night: nightT > 0.5 });
+    const finalScore = Math.floor(score), isHigh = finalScore > hi;
+    track('game_over', {
+      score: finalScore,
+      high_score: Math.max(hi, finalScore),
+      new_high_score: isHigh,
+      night: nightT > 0.5,
+      controls: motionOn ? 'camera' : isCoarse ? 'touch' : 'keyboard',
+      duration_s: Math.round((performance.now() - runStartedAt) / 1000),
+    });
+    if (isHigh) track('new_high_score', { score: finalScore, previous_high_score: hi });
     if (score > hi) {
       hi = Math.floor(score);
       elHi.textContent = 'HI ' + pad5(hi);
@@ -745,6 +756,9 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
         if (shownScore >= 0 && Math.floor(s / 100) > Math.floor(shownScore / 100)) {
           beep(880, 0.08); setTimeout(() => beep(1320, 0.12), 90);
           elScore.classList.remove('flash'); void elScore.offsetWidth; elScore.classList.add('flash');
+        }
+        if (shownScore >= 0 && Math.floor(s / SCORE_MILESTONE) > Math.floor(shownScore / SCORE_MILESTONE)) {
+          track('score_milestone', { milestone: Math.floor(s / SCORE_MILESTONE) * SCORE_MILESTONE });
         }
         shownScore = s;
         elCur.textContent = pad5(s);
